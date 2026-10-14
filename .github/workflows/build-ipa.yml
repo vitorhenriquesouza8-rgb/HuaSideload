@@ -1,0 +1,40 @@
+# Builds an unsigned HuaSideload.ipa on a GitHub macOS runner, for sideloading from Windows with Sideloadly.
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      HUASIDELOAD_BUNDLE_ID: com.vitor.huasideload
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: ./generate.sh
+
+      - name: Build (no code signing)
+        run: |
+          xcodebuild -project HuaSideload.xcodeproj -target HuaSideload \
+            -sdk iphoneos -configuration Release \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -R build/Release-iphoneos/HuaSideload.app Payload/
+          zip -qry HuaSideload.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HuaSideload-ipa
+          path: HuaSideload.ipa

@@ -311,10 +311,19 @@ struct HiChainMessage {
         }
         guard type == 0x00 else { return .finished }
 
-        guard let raw = tlv.value(0x01),
-              let value = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any],
-              let payload = value["payload"] as? [String: Any] else {
-            throw HuaweiAuthError.unexpected("HiChain JSON could not be decoded")
+        guard let raw = tlv.value(0x01) else {
+            throw HuaweiAuthError.unexpected("HiChain reply has no JSON (0x01), tags: \(tagList(tlv))")
+        }
+        guard let value = lenientJSONObject(raw) else {
+            throw HuaweiAuthError.unexpected("HiChain JSON could not be decoded (\(raw.count) bytes, tags: \(tagList(tlv)), "
+                + "starts \(Array(raw.prefix(16)).hexCompact), ends \(Array(raw.suffix(16)).hexCompact))")
+        }
+        // org.json (Gadgetbridge) also accepts a payload that arrives as an embedded JSON string
+        let payloadField = value["payload"]
+        guard let payload = payloadField as? [String: Any]
+                ?? (payloadField as? String).flatMap({ lenientJSONObject(Array($0.utf8)) }) else {
+            throw HuaweiAuthError.unexpected("HiChain JSON has no payload object, keys: "
+                + value.keys.sorted().joined(separator: ","))
         }
         if let code = payload["errorCode"] as? Int, code != 0 {
             throw HuaweiAuthError.watchError("HiChain errorCode \(code)")
@@ -323,6 +332,19 @@ struct HiChainMessage {
         if payload["returnCodeMac"] != nil { return .step(2, payload) }
         if payload["encAuthToken"] != nil { return .step(3, payload) }
         return .step(0, payload)
+    }
+
+    // JSONSerialization is stricter than Gadgetbridge's org.json: it rejects trailing NUL bytes,
+    // whitespace or other bytes after the closing brace. Retry on the outermost {...} span.
+    private static func lenientJSONObject(_ raw: [UInt8]) -> [String: Any]? {
+        if let object = try? JSONSerialization.jsonObject(with: Data(raw)) as? [String: Any] { return object }
+        guard let start = raw.firstIndex(of: UInt8(ascii: "{")),
+              let end = raw.lastIndex(of: UInt8(ascii: "}")), start < end else { return nil }
+        return try? JSONSerialization.jsonObject(with: Data(raw[start...end]), options: [.fragmentsAllowed]) as? [String: Any]
+    }
+
+    private static func tagList(_ tlv: HuaweiTLV) -> String {
+        tlv.items.map { String(format: "%02X(%d)", $0.tag, $0.value.count) }.joined(separator: " ")
     }
 
     static func hexField(_ payload: [String: Any], _ key: String) throws -> [UInt8] {

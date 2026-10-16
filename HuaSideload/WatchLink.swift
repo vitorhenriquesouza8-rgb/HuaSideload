@@ -261,11 +261,47 @@ final class WatchLink: NSObject, ObservableObject {
 
     // MARK: - Watch commands
 
+    // The GT 5 Pro (firmware 6.0) refuses every action with 100004 about 2-3 minutes after pairing,
+    // even with Huawei Health's Bluetooth off; reconnecting and pairing again with the saved key restores
+    // it. Actions therefore renew a session older than this first.
+    private var pairedAt: Date?
+    private var renewing = false
+    private let sessionLifetime: TimeInterval = 60
+
+    private func renewSessionIfStale() async -> Bool {
+        if isPaired, let pairedAt, Date().timeIntervalSince(pairedAt) < sessionLifetime { return true }
+        guard let peripheral, let watchKey else { return false }
+        append(.info, L("Renewing the watch session (it expires after a few minutes)…", "Saat oturumu yenileniyor (birkaç dakikada sona eriyor)…"))
+        renewing = true
+        defer { renewing = false }
+        wantsConnection = true
+        central.cancelPeripheralConnection(peripheral)
+        try? await Task.sleep(for: .seconds(1))
+        for _ in 0..<80 where !huaweiChannelReady {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        guard huaweiChannelReady else {
+            append(.error, L("Could not reconnect to the watch within 20 s", "20 saniyede saate yeniden bağlanılamadı"))
+            return false
+        }
+        do {
+            try await session.pair(watch: watchKey)
+            isPaired = true
+            self.pairedAt = Date()
+            await session.introducePhone(account: Self.huaweiAccount)
+            return true
+        } catch {
+            append(.error, "\(error)")
+            return false
+        }
+    }
+
     func pair() {
         guard let watchKey else { return }
         run(L("Pairing…", "Eşleşiyor…")) { session in
             try await session.pair(watch: watchKey)
             self.isPaired = true
+            self.pairedAt = Date()
             self.watchUDID = session.watchUDID
             if let udid = session.watchUDID { self.addSecret(udid) }
             let environment = ProcessInfo.processInfo.environment
@@ -302,7 +338,7 @@ final class WatchLink: NSObject, ObservableObject {
     func sendMessage(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        run(L("Sending…", "Gönderiliyor…")) { session in
+        run(L("Sending…", "Gönderiliyor…"), fresh: true) { session in
             try await session.sendNotification(title: AppInfo.displayName, text: text)
             self.append(.success, L("Sent to the watch: \"\(text)\"", "Mesaj saate gönderildi: \"\(text)\""))
         }
@@ -404,7 +440,7 @@ final class WatchLink: NSObject, ObservableObject {
     // MARK: - The watch's music player
 
     func loadMusicStorage() {
-        run(L("Reading the watch's music storage…", "Saatin müzik hafızası okunuyor…")) { session in
+        run(L("Reading the watch's music storage…", "Saatin müzik hafızası okunuyor…"), fresh: true) { session in
             self.musicStorage = try await session.musicStorage()
         }
     }
@@ -417,7 +453,7 @@ final class WatchLink: NSObject, ObservableObject {
         }
         guard !files.isEmpty else { return }
         watchAppProgress = 0
-        run(L("Uploading music to the watch…", "Saate müzik yükleniyor…")) { session in
+        run(L("Uploading music to the watch…", "Saate müzik yükleniyor…"), fresh: true) { session in
             defer {
                 self.watchAppProgress = nil
                 self.musicUploadStatus = nil
@@ -457,7 +493,7 @@ final class WatchLink: NSObject, ObservableObject {
     }
 
     func loadInstalledApps() {
-        run(L("Reading the apps on the watch…", "Saatteki uygulamalar okunuyor…")) { session in
+        run(L("Reading the apps on the watch…", "Saatteki uygulamalar okunuyor…"), fresh: true) { session in
             self.installedApps = try await session.installedApps()
         }
     }
@@ -477,7 +513,7 @@ final class WatchLink: NSObject, ObservableObject {
     // Installs a signed watch app bundled in the iPhone app (WatchApps/*.bin) on the watch
     func installWatchApp(_ app: BundledWatchApp) {
         watchAppProgress = 0
-        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…")) { session in
+        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…"), fresh: true) { session in
             defer { self.watchAppProgress = nil }
             self.append(.info, "\(app.name): \(app.package) \(app.version), \(app.data.count) \(L("bytes", "bayt"))")
             if let platform = try? await session.appPlatform() {
@@ -526,10 +562,14 @@ final class WatchLink: NSObject, ObservableObject {
         report(0x27, L("Watch faces", "Kadran kurma"))
     }
 
-    private func run(_ label: String, _ work: @escaping (HuaweiSession) async throws -> Void) {
+    private func run(_ label: String, fresh: Bool = false, _ work: @escaping (HuaweiSession) async throws -> Void) {
         guard busy == nil else { return }
         busy = label
         Task {
+            if fresh, !(await renewSessionIfStale()) {
+                busy = nil
+                return
+            }
             do {
                 try await work(session)
             } catch {
@@ -757,7 +797,9 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
         huaweiChannelReady = characteristic.isNotifying && writeCharacteristic != nil
         if huaweiChannelReady {
             append(.success, L("Huawei channel ready. BLE write limit: \(maxWriteLength) bytes", "Huawei kanalı hazır. BLE yazma sınırı: \(maxWriteLength) bayt"))
-            if hasSavedPairing {
+            if renewing {
+                // renewSessionIfStale pairs itself
+            } else if hasSavedPairing {
                 append(.info, L("Saved pairing found, pairing automatically…", "Kayıtlı eşleşme var, otomatik eşleşiliyor…"))
                 pair()
             } else {

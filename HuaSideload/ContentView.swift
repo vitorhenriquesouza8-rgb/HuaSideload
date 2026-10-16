@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var copied = false
     @State private var message = ""
     @State private var pickingMusic = false
+    @AppStorage(WatchLink.huaweiAccountKey) private var huaweiAccount = ""
 
     var body: some View {
         NavigationStack {
@@ -120,14 +121,23 @@ struct ContentView: View {
             } else {
                 Button(L("Refresh battery and watch info", "Pil ve saat bilgisini yenile")) { link.refresh() }
                     .disabled(link.busy != nil)
+                Button(L("Introduce the phone again", "Telefonu tekrar tanıt")) { link.introducePhone() }
+                    .disabled(link.busy != nil)
             }
+            TextField(L("Huawei account ID (17 digits, optional)", "Huawei hesap kimliği (17 hane, isteğe bağlı)"), text: $huaweiAccount)
+                .keyboardType(.numberPad)
+                .font(.callout.monospaced())
             Button(L("Disconnect", "Bağlantıyı kes"), role: .destructive) { link.disconnect() }
         } header: {
             Text(L("Watch", "Saat"))
         } footer: {
-            if !link.isPaired && !link.hasSavedPairing {
-                Text(L("Close Huawei Health before pairing (swipe it up in the app switcher). The watch may ask for confirmation the first time.",
-                       "Eşleşmeden önce Huawei Health'i kapat (uygulama değiştiriciden yukarı kaydır). İlk eşleşmede saatin ekranında onay çıkabilir."))
+            VStack(alignment: .leading, spacing: 6) {
+                if !link.isPaired && !link.hasSavedPairing {
+                    Text(L("Close Huawei Health before pairing (swipe it up in the app switcher). The watch may ask for confirmation the first time.",
+                           "Eşleşmeden önce Huawei Health'i kapat (uygulama değiştiriciden yukarı kaydır). İlk eşleşmede saatin ekranında onay çıkabilir."))
+                }
+                Text(L("Newer watches refuse notifications, music and apps (error 100004) until the phone presents the Huawei account the watch is bound to. It is sent after pairing.",
+                       "Yeni saatler, telefon saatin bağlı olduğu Huawei hesabını göstermeden bildirim, müzik ve uygulamayı reddeder (hata 100004). Eşleşmeden sonra gönderilir."))
             }
         }
     }

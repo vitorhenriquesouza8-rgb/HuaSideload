@@ -299,3 +299,47 @@ enum PhoneInfo {
         return tlv
     }
 }
+
+// Requests Gadgetbridge sends right after authentication (DeviceConfig.TimeRequest, AcceptAgreement,
+// PermissionCheck; AccountRelated.SendExtendedAccountToDevice)
+enum PhoneSetup {
+    static let timeCommand: UInt8 = 0x05
+    static let acceptAgreementCommand: UInt8 = 0x30
+    static let permissionCheckCommand: UInt8 = 0x38
+    static let accountServiceId: UInt8 = 0x1A
+    static let extendedAccountCommand: UInt8 = 0x05
+
+    // HuaweiUtil.getTimeAndZoneId: seconds since 1970 and the UTC offset as [hours (+128 if negative), minutes]
+    static func time(_ now: Date = Date(), zone: TimeZone = .current) -> HuaweiTLV {
+        let offset = zone.secondsFromGMT(for: now)
+        let hours = UInt8(abs(offset) / 3600) + (offset < 0 ? 128 : 0)
+        let minutes = UInt8(abs(offset) / 60 % 60)
+        return HuaweiTLV()
+            .with(0x01, .bigEndian(UInt32(truncatingIfNeeded: Int(now.timeIntervalSince1970))))
+            .with(0x02, [hours, minutes])
+    }
+
+    // The 17-digit Huawei account ID the watch is bound to; empty sends 0x00 like Gadgetbridge
+    static func extendedAccount(_ account: String) -> HuaweiTLV {
+        let account = account.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HuaweiTLV().with(0x01, account.isEmpty ? [0x00] : Array(account.utf8))
+    }
+
+    static func acceptAgreements(_ now: Date = Date()) -> HuaweiTLV {
+        let timestamp = Array(String(Int(now.timeIntervalSince1970 * 1000)).utf8)
+        let list = ["software_update_service_statement", "device_information_management", "user_license_agreement"]
+            .reduce(HuaweiTLV()) { list, name in
+                list.with(0x82, HuaweiTLV()
+                    .with(0x03, Array(name.utf8))
+                    .with(0x04, [0x01])
+                    .with(0x05, Array("20230508-20230508-0-0".utf8))
+                    .with(0x06, timestamp)
+                    .serialize())
+            }
+        return HuaweiTLV().with(0x81, list.serialize())
+    }
+
+    static func permissionCheckReply(permission: [UInt8]) -> HuaweiTLV {
+        HuaweiTLV().with(0x01, permission).with(0x02, .bigEndian(UInt16(0)))
+    }
+}

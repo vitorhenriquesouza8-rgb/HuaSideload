@@ -279,8 +279,19 @@ final class WatchLink: NSObject, ObservableObject {
                     self.uploadMusic([URL.documentsDirectory.appending(path: file)])
                 }
             }
+            await session.introducePhone(account: Self.huaweiAccount)
             self.features.forEach { $0.watchPaired() }
             try await self.refreshInfo(session)
+        }
+    }
+
+    // The Huawei account ID typed on the main screen (see PhoneSetup.extendedAccount)
+    static let huaweiAccountKey = "huaweiAccount"
+    static var huaweiAccount: String { UserDefaults.standard.string(forKey: huaweiAccountKey) ?? "" }
+
+    func introducePhone() {
+        run(L("Introducing the phone…", "Telefon tanıtılıyor…")) { session in
+            await session.introducePhone(account: Self.huaweiAccount)
         }
     }
 

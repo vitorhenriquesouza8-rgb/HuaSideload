@@ -160,6 +160,13 @@ final class HuaweiSession {
             log(.info, L("The watch asked for phone info; answered as Android 14", "Saat telefon bilgisi istedi; Android 14 dedik"))
             return
         }
+        // AsynchronousResponse.handlePermissionCheck: Gadgetbridge always answers {permission, status 0}
+        if isPaired, packet.serviceId == 0x01, packet.commandId == PhoneSetup.permissionCheckCommand,
+           let tlv = packet.tlv, let permission = tlv.value(0x01), tlv.value(0x7F) == nil {
+            send(0x01, PhoneSetup.permissionCheckCommand, PhoneSetup.permissionCheckReply(permission: permission))
+            log(.info, L("The watch asked a permission check (\(permission.hexCompact)); answered", "Saat izin kontrolü sordu (\(permission.hexCompact)); cevaplandı"))
+            return
+        }
         if isPaired, packet.serviceId == WatchApps.serviceId, packet.commandId == WatchApps.installStatusCommand, let tlv = packet.tlv {
             let status = tlv.int(0x01) ?? -1
             let package = tlv.value(0x02).map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -364,6 +371,33 @@ final class HuaweiSession {
     }
 
     // MARK: - Commands after pairing
+
+    // Part of Gadgetbridge's initializeDeviceConfigure/initializeDynamicServices: newer watches refuse
+    // actions (error 100004) until the phone sets the time, presents the Huawei account the watch is
+    // bound to and accepts the agreements. Each step is optional; failures are only logged.
+    func introducePhone(account: String) async {
+        var steps: [(String, UInt8, UInt8, HuaweiTLV)] = [
+            (L("Set time", "Saati ayarla"), 0x01, PhoneSetup.timeCommand, PhoneSetup.time()),
+            (L("Accept agreements", "Sözleşmeleri kabul et"), 0x01, PhoneSetup.acceptAgreementCommand, PhoneSetup.acceptAgreements()),
+        ]
+        // Only with an account typed in: an empty or different account may look like a new owner to a bound watch
+        if !account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            steps.insert((L("Huawei account", "Huawei hesabı"), PhoneSetup.accountServiceId, PhoneSetup.extendedAccountCommand,
+                          PhoneSetup.extendedAccount(account)), at: 1)
+        }
+        for (label, serviceId, commandId, tlv) in steps {
+            do {
+                let response = try await request(serviceId, commandId, tlv, label: label, timeout: 5)
+                if let code = response.tlv?.int(0x7F), code != HuaweiPacket.resultSuccess {
+                    log(.error, "\(label): \(L("watch error code", "saat hata kodu")) \(code)")
+                } else {
+                    log(.success, "\(label): OK")
+                }
+            } catch {
+                log(.info, "\(label): \(error)")
+            }
+        }
+    }
 
     func batteryLevel() async throws -> Int {
         let response = try await request(0x01, 0x08, HuaweiTLV().with(0x01), label: L("Battery level", "Pil seviyesi"))

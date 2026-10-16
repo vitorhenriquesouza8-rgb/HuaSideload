@@ -27,6 +27,11 @@ NODE="${NODE16:-$HOME/nodejs/bin/node}"
 [ -x "$NODE" ] || NODE="$(command -v node || true)"
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# Windows (Git Bash): Python is usually "python" (the "python3" alias may be the Microsoft Store stub),
+# and paths handed to native tools through environment variables must be Windows paths
+python3 -c '' 2>/dev/null || python3() { python "$@"; }
+native_path() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 [ -f "$APP/entry/src/main/config.json" ] || fail "$APP/entry/src/main/config.json not found (is this a watch app folder?)"
 [ -d "$SDK/js/build-tools/ace-loader" ] || fail "OpenHarmony SDK not found: $SDK (README > Requirements)"
 [ -n "$NODE" ] || fail "Node.js 16 not found (README > Requirements)"
@@ -94,13 +99,13 @@ json.dump({
 EOF
 
 # png/jpg resources are converted to the lite image format (.bin), keeping the folder layout
-(cd "$MAIN/resources" && find . -type f \( -iname '*.png' -o -iname '*.jpg' \) -exec rsync -R {} "$BUILD/lite_bin_source/" \;)
+(cd "$MAIN/resources" && find . -type f \( -iname '*.png' -o -iname '*.jpg' \) -exec cp --parents {} "$BUILD/lite_bin_source/" \;)
 
 echo "2/5 ace-loader (lite, $MODE)"
 (cd "$SDK/js/build-tools/ace-loader" && \
-  aceModuleRoot="$MAIN/js/default" aceModuleBuild="$BUILD/loader_out_lite/js/default" \
-  aceManifestPath="$BUILD/manifest/manifest.json" cachePath="$BUILD/cache" \
-  img2bin=true iconPath="$BUILD/lite_bin_source" hapMode=$([ "$MODE" = release ] && echo true || echo false) \
+  aceModuleRoot="$(native_path "$MAIN/js/default")" aceModuleBuild="$(native_path "$BUILD/loader_out_lite/js/default")" \
+  aceManifestPath="$(native_path "$BUILD/manifest/manifest.json")" cachePath="$(native_path "$BUILD/cache")" \
+  img2bin=true iconPath="$(native_path "$BUILD/lite_bin_source")" hapMode=$([ "$MODE" = release ] && echo true || echo false) \
   "$NODE" ./node_modules/webpack/bin/webpack.js --config webpack.lite.config.js \
     --env buildMode="$MODE" --env deviceType=liteWearable) > "$BUILD/compile.log" 2>&1 || true
 grep -E 'COMPILE RESULT' "$BUILD/compile.log" || true

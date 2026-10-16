@@ -102,6 +102,7 @@ final class HuaweiSession {
         link = nil
         isPaired = false
         sessionKey = nil
+        lastIntroduction = nil
         let pending = waiters
         waiters.removeAll()
         pending.forEach { $0.continuation.resume(throwing: HuaweiSessionError.disconnected) }
@@ -160,11 +161,11 @@ final class HuaweiSession {
             log(.info, L("The watch asked for phone info; answered as Android 14", "Saat telefon bilgisi istedi; Android 14 dedik"))
             return
         }
-        // AsynchronousResponse.handlePermissionCheck: Gadgetbridge always answers {permission, status 0}
+        // Gadgetbridge answers {permission, status 0}, but on the GT 5 Pro the actions stopped working after
+        // such an answer was refused (100004), so for now the check is only logged, not answered
         if isPaired, packet.serviceId == 0x01, packet.commandId == PhoneSetup.permissionCheckCommand,
            let tlv = packet.tlv, let permission = tlv.value(0x01), tlv.value(0x7F) == nil {
-            send(0x01, PhoneSetup.permissionCheckCommand, PhoneSetup.permissionCheckReply(permission: permission))
-            log(.info, L("The watch asked a permission check (\(permission.hexCompact)); answered", "Saat izin kontrolü sordu (\(permission.hexCompact)); cevaplandı"))
+            log(.info, L("The watch asked a permission check (\(permission.hexCompact)); not answered", "Saat izin kontrolü sordu (\(permission.hexCompact)); cevaplanmadı"))
             return
         }
         if isPaired, packet.serviceId == WatchApps.serviceId, packet.commandId == WatchApps.installStatusCommand, let tlv = packet.tlv {
@@ -372,19 +373,36 @@ final class HuaweiSession {
 
     // MARK: - Commands after pairing
 
+    // On the GT 5 Pro the permission granted by the introduction runs out after a short while (actions
+    // fail with 100004 again), so actions renew it first when the last introduction is older than this
+    private var lastIntroduction: Date?
+    private var introducedAccount = ""
+    private let introductionLifetime: TimeInterval = 15
+
+    private func ensureIntroduced() async {
+        if let lastIntroduction, Date().timeIntervalSince(lastIntroduction) < introductionLifetime { return }
+        await introducePhone(account: introducedAccount, includeMusic: false)
+    }
+
     // Part of Gadgetbridge's initializeDeviceConfigure/initializeDynamicServices: newer watches refuse
     // actions (error 100004) until the phone sets the time, presents the Huawei account the watch is
     // bound to and accepts the agreements. Each step is optional; failures are only logged.
-    func introducePhone(account: String) async {
+    func introducePhone(account: String, includeMusic: Bool = true) async {
+        introducedAccount = account
+        lastIntroduction = Date()
         var steps: [(String, UInt8, UInt8, HuaweiTLV)] = [
             (L("Set time", "Saati ayarla"), 0x01, PhoneSetup.timeCommand, PhoneSetup.time()),
             (L("Accept agreements", "Sözleşmeleri kabul et"), 0x01, PhoneSetup.acceptAgreementCommand, PhoneSetup.acceptAgreements()),
-            // initializeDynamicServices queries the music capabilities before any music upload
-            (L("Music capabilities", "Müzik yetenekleri"), MusicControl.serviceId, MusicControl.storageCommand,
-             HuaweiTLV().with(0x01).with(0x02).with(0x03)),
-            (L("Music capabilities (extended)", "Müzik yetenekleri (genişletilmiş)"), MusicControl.serviceId, MusicControl.extendedStorageCommand,
-             HuaweiTLV().with(0x01).with(0x02).with(0x03).with(0x04).with(0x05)),
         ]
+        if includeMusic {
+            // initializeDynamicServices queries the music capabilities before any music upload
+            steps += [
+                (L("Music capabilities", "Müzik yetenekleri"), MusicControl.serviceId, MusicControl.storageCommand,
+                 HuaweiTLV().with(0x01).with(0x02).with(0x03)),
+                (L("Music capabilities (extended)", "Müzik yetenekleri (genişletilmiş)"), MusicControl.serviceId, MusicControl.extendedStorageCommand,
+                 HuaweiTLV().with(0x01).with(0x02).with(0x03).with(0x04).with(0x05)),
+            ]
+        }
         // Only with an account typed in: an empty or different account may look like a new owner to a bound watch
         if !account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             steps.insert((L("Huawei account", "Huawei hesabı"), PhoneSetup.accountServiceId, PhoneSetup.extendedAccountCommand,
@@ -423,6 +441,7 @@ final class HuaweiSession {
     }
 
     func installedApps() async throws -> [WatchApps.Installed] {
+        await ensureIntroduced()
         let response = try await request(WatchApps.serviceId, WatchApps.listCommand, HuaweiTLV().with(0x81), label: L("Installed apps", "Kurulu uygulamalar"))
         guard let tlv = response.tlv else { throw HuaweiAuthError.unexpected("AppNames TLV") }
         return WatchApps.installed(tlv)
@@ -430,6 +449,7 @@ final class HuaweiSession {
 
     // The watch may not answer (Gadgetbridge doesn't wait either); the app list tells us the result
     func deleteApp(_ package: String) async throws {
+        await ensureIntroduced()
         do {
             let response = try await request(WatchApps.serviceId, WatchApps.deleteCommand, WatchApps.delete(package: package),
                                              label: L("Delete app (\(package))", "Uygulama sil (\(package))"), timeout: 6)
@@ -469,6 +489,7 @@ final class HuaweiSession {
 
     // Gadgetbridge asks MusicInfoParams (0x04) with tags 1-3 and, on newer watches, ExtendedMusicInfoParams (0x0D)
     func musicStorage() async throws -> MusicControl.Storage {
+        await ensureIntroduced()
         let label = L("Watch music storage", "Saatin müzik hafızası")
         let response = try await request(MusicControl.serviceId, MusicControl.storageCommand,
                                          HuaweiTLV().with(0x01).with(0x02).with(0x03), label: label)
@@ -508,6 +529,7 @@ final class HuaweiSession {
     // Uploads a file to the watch (app: type 6, name "<package>_INSTALL"; music: type 2). The watch drives the flow.
     func uploadFile(_ data: [UInt8], name: String, type: UInt8, progress: @escaping (Double) -> Void) async throws {
         guard upload == nil else { throw HuaweiAuthError.unexpected(L("another upload is running", "zaten bir yükleme sürüyor")) }
+        await ensureIntroduced()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             upload = Upload(data: data, sha256: HCrypto.sha256(data), progress: progress, continuation: continuation)
             Task {
@@ -637,6 +659,7 @@ final class HuaweiSession {
     }
 
     func sendNotification(title: String, text: String) async throws {
+        await ensureIntroduced()
         notificationId &+= 1
         let tlv = WatchNotification.request(id: notificationId, title: title, sender: title, text: text)
         do {

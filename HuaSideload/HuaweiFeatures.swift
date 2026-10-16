@@ -65,6 +65,13 @@ enum MusicControl {
     static func storage(_ tlv: HuaweiTLV) -> Storage {
         Storage(freeMB: tlv.int(0x02) ?? 0, maxSongs: tlv.int(0x04) ?? 0, songs: tlv.int(0x05) ?? 0)
     }
+
+    // MusicControl.ExtendedMusicInfoParams: 0x01 = free space, 0x03 = max songs (no current count)
+    static let extendedStorageCommand: UInt8 = 0x0D
+
+    static func extendedStorage(_ tlv: HuaweiTLV) -> Storage {
+        Storage(freeMB: tlv.int(0x01) ?? 0, maxSongs: tlv.int(0x03) ?? 0, songs: 0)
+    }
 }
 
 // Asks which of the known services the watch supports (DeviceConfig 0x02)

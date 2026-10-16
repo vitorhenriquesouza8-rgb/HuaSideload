@@ -379,6 +379,11 @@ final class HuaweiSession {
         var steps: [(String, UInt8, UInt8, HuaweiTLV)] = [
             (L("Set time", "Saati ayarla"), 0x01, PhoneSetup.timeCommand, PhoneSetup.time()),
             (L("Accept agreements", "Sözleşmeleri kabul et"), 0x01, PhoneSetup.acceptAgreementCommand, PhoneSetup.acceptAgreements()),
+            // initializeDynamicServices queries the music capabilities before any music upload
+            (L("Music capabilities", "Müzik yetenekleri"), MusicControl.serviceId, MusicControl.storageCommand,
+             HuaweiTLV().with(0x01).with(0x02).with(0x03)),
+            (L("Music capabilities (extended)", "Müzik yetenekleri (genişletilmiş)"), MusicControl.serviceId, MusicControl.extendedStorageCommand,
+             HuaweiTLV().with(0x01).with(0x02).with(0x03).with(0x04).with(0x05)),
         ]
         // Only with an account typed in: an empty or different account may look like a new owner to a bound watch
         if !account.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -462,12 +467,17 @@ final class HuaweiSession {
         return response.tlv?.value(0x01) ?? []
     }
 
+    // Gadgetbridge asks MusicInfoParams (0x04) with tags 1-3 and, on newer watches, ExtendedMusicInfoParams (0x0D)
     func musicStorage() async throws -> MusicControl.Storage {
+        let label = L("Watch music storage", "Saatin müzik hafızası")
         let response = try await request(MusicControl.serviceId, MusicControl.storageCommand,
+                                         HuaweiTLV().with(0x01).with(0x02).with(0x03), label: label)
+        if let tlv = response.tlv, tlv.int(0x7F) == nil { return MusicControl.storage(tlv) }
+        let extended = try await request(MusicControl.serviceId, MusicControl.extendedStorageCommand,
                                          HuaweiTLV().with(0x01).with(0x02).with(0x03).with(0x04).with(0x05),
-                                         label: L("Watch music storage", "Saatin müzik hafızası"))
-        guard let tlv = response.tlv else { throw HuaweiAuthError.unexpected("MusicInfoParams TLV") }
-        return MusicControl.storage(tlv)
+                                         label: label + " (extended)")
+        guard let tlv = extended.tlv else { throw HuaweiAuthError.unexpected("ExtendedMusicInfoParams TLV") }
+        return MusicControl.extendedStorage(tlv)
     }
 
     func rawRequest(_ service: UInt8, _ command: UInt8, _ tlv: HuaweiTLV, label: String) async throws -> HuaweiTLV? {

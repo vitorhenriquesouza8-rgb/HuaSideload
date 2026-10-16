@@ -269,8 +269,8 @@ final class WatchLink: NSObject, ObservableObject {
     private var renewing = false
     private let sessionLifetime: TimeInterval = 30
 
-    private func renewSessionIfStale() async -> Bool {
-        if isPaired, let pairedAt, Date().timeIntervalSince(pairedAt) < sessionLifetime { return true }
+    private func renewSessionIfStale(maxAge: TimeInterval? = nil) async -> Bool {
+        if isPaired, let pairedAt, Date().timeIntervalSince(pairedAt) < (maxAge ?? sessionLifetime) { return true }
         guard let peripheral, let watchKey else { return false }
         append(.info, L("Renewing the watch session (it expires after a few minutes)…", "Saat oturumu yenileniyor (birkaç dakikada sona eriyor)…"))
         renewing = true
@@ -479,8 +479,23 @@ final class WatchLink: NSObject, ObservableObject {
                 self.musicMetadata[name] = meta
                 self.musicUploadStatus = "\(i + 1)/\(files.count): \(meta.title)"
                 self.append(.info, L("Uploading music (\(i + 1)/\(files.count)): \(name), \(data.count / 1024) KB", "Müzik yükleniyor (\(i + 1)/\(files.count)): \(name), \(data.count / 1024) KB"))
-                try await session.uploadFile([UInt8](data), name: name, type: MusicControl.fileType) { fraction in
-                    self.watchAppProgress = (Double(i) + fraction) / Double(files.count)
+                // The GT 5 Pro revokes the session ~30 s after pairing, long before a song is through. Reconnect
+                // and send the same file again; if the watch kept the received part it asks from there on.
+                // Start each file with most of the ~30 s window left
+                guard await self.renewSessionIfStale(maxAge: 10) else { throw HuaweiSessionError.notPaired }
+                var attempt = 1
+                while true {
+                    do {
+                        try await session.uploadFile([UInt8](data), name: name, type: MusicControl.fileType) { fraction in
+                            self.watchAppProgress = (Double(i) + fraction) / Double(files.count)
+                        }
+                        break
+                    } catch HuaweiSessionError.sessionRevoked where attempt < 15 {
+                        attempt += 1
+                        self.append(.info, L("Session cut mid-upload; reconnecting to continue (attempt \(attempt))",
+                                             "Yükleme sırasında oturum kesildi; devam etmek için yeniden bağlanılıyor (deneme \(attempt))"))
+                        guard await self.renewSessionIfStale(maxAge: 0) else { throw HuaweiSessionError.sessionRevoked }
+                    }
                 }
                 self.append(.success, L("Uploaded to the watch: \(meta.title)", "Saate yüklendi: \(meta.title)"))
                 // Give the watch a moment to add the song to its library

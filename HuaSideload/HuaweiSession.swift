@@ -5,9 +5,11 @@ enum HuaweiSessionError: Error, CustomStringConvertible {
     case disconnected
     case notPaired
     case unsupported(String)
+    case sessionRevoked
 
     var description: String {
         switch self {
+        case .sessionRevoked: return L("The watch revoked the session (100004)", "Saat oturumu iptal etti (100004)")
         case .timeout(let label): return L("\(label): the watch did not answer (timeout)", "\(label): saat cevap vermedi (zaman aşımı)")
         case .disconnected: return L("Connection lost", "Bağlantı koptu")
         case .notPaired: return L("Pair with the watch first", "Önce eşleşmek gerekiyor")
@@ -63,6 +65,7 @@ final class HuaweiSession {
         var unitSize = 0
         var encrypt = true
         var lastActivity = Date()
+        var firstOffsetLogged = false
     }
     private var upload: Upload?
 
@@ -151,6 +154,10 @@ final class HuaweiSession {
         // Gadgetbridge does not expect them. Log the raw body (no identity in it) to learn what they mean.
         if isPaired, packet.serviceId == FileUpload.serviceId, packet.commandId == FileUpload.Command.chunk {
             log(.info, L("Watch chunk reply: ", "Saatin parça cevabı: ") + packet.body.hexCompact)
+            // 7F = 100004: the GT 5 Pro revoked the session (~30 s after pairing); stop waiting for chunk requests
+            if packet.body == HuaweiTLV().with(0x7F, .bigEndian(UInt32(100_004))).serialize() {
+                finishUpload(HuaweiSessionError.sessionRevoked)
+            }
             return
         }
         if isPaired, packet.serviceId == FileUpload.serviceId, let tlv = packet.tlv {
@@ -627,6 +634,10 @@ final class HuaweiSession {
         case FileUpload.Command.chunkParams:
             let offset = tlv.int(0x02) ?? 0
             let size = tlv.int(0x03) ?? 0
+            if !current.firstOffsetLogged {
+                current.firstOffsetLogged = true
+                log(.info, L("The watch starts at byte \(offset) of \(current.data.count)", "Saat \(current.data.count) baytın \(offset). baytından başlıyor"))
+            }
             upload = current
             guard offset < current.data.count, size > 0, current.unitSize > 0 else {
                 log(.error, L("Invalid chunk request: offset \(offset), size \(size)", "Geçersiz parça isteği: konum \(offset), boyut \(size)"))

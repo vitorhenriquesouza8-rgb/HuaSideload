@@ -147,6 +147,12 @@ final class HuaweiSession {
 
     // Requests started by the watch (AsynchronousResponse in Gadgetbridge); most are acknowledged with 0x7F = success
     private func handleUnsolicited(_ packet: HuaweiPacket) {
+        // The GT 5 Pro sent a burst of these (watch -> phone chunk command) right before a music upload stalled;
+        // Gadgetbridge does not expect them. Log the raw body (no identity in it) to learn what they mean.
+        if isPaired, packet.serviceId == FileUpload.serviceId, packet.commandId == FileUpload.Command.chunk {
+            log(.info, L("Watch chunk reply: ", "Saatin parça cevabı: ") + packet.body.hexCompact)
+            return
+        }
         if isPaired, packet.serviceId == FileUpload.serviceId, let tlv = packet.tlv {
             handleUpload(packet.commandId, tlv)
             return

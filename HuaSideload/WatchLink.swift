@@ -249,6 +249,7 @@ final class WatchLink: NSObject, ObservableObject {
         bridges.values.forEach { $0.reset() }
         features.forEach { $0.connectionLost() }
         writeCharacteristic = nil
+        writeQueue.removeAll()
         huaweiChannelReady = false
         isPaired = false
         connectedName = nil
@@ -590,19 +591,32 @@ final class WatchLink: NSObject, ObservableObject {
         characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
     }
 
-    // One frame; split raw if it is larger than the BLE write limit
+    // One frame; split raw if it is larger than the BLE write limit. Writes without response are queued
+    // and only handed to iOS while canSendWriteWithoutResponse is true: iOS silently drops them when its
+    // buffer is full, which corrupted fast file uploads (the watch asks for many chunks back to back).
+    private var writeQueue: [Data] = []
+
     private func write(_ frame: [UInt8]) {
         guard let peripheral, let characteristic = writeCharacteristic else {
             append(.error, L("The Huawei channel is not ready", "Huawei kanalı hazır değil"))
             return
         }
-        let type = writeType(characteristic)
-        let maxChunk = peripheral.maximumWriteValueLength(for: type)
+        let maxChunk = peripheral.maximumWriteValueLength(for: writeType(characteristic))
         var offset = 0
         while offset < frame.count {
             let end = min(offset + maxChunk, frame.count)
-            peripheral.writeValue(Data(frame[offset..<end]), for: characteristic, type: type)
+            writeQueue.append(Data(frame[offset..<end]))
             offset = end
+        }
+        flushWrites()
+    }
+
+    private func flushWrites() {
+        guard let peripheral, let characteristic = writeCharacteristic else { return }
+        let type = writeType(characteristic)
+        while !writeQueue.isEmpty {
+            if type == .withoutResponse && !peripheral.canSendWriteWithoutResponse { return }
+            peripheral.writeValue(writeQueue.removeFirst(), for: characteristic, type: type)
         }
     }
 
@@ -806,6 +820,10 @@ extension WatchLink: @preconcurrency CBPeripheralDelegate {
                 append(.info, L("Not paired yet. Start with 'Pair'.", "Henüz eşleşme yok. 'Eşleş' ile başla."))
             }
         }
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        flushWrites()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {

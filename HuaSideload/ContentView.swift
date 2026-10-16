@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var copied = false
     @State private var message = ""
     @State private var pickingMusic = false
+    @State private var pickingWatchApp = false
     @AppStorage(WatchLink.huaweiAccountKey) private var huaweiAccount = ""
     @AppStorage(PhoneSetup.claimMainDeviceKey) private var claimMainDevice = false
 
@@ -172,13 +173,19 @@ struct ContentView: View {
             }
             Button(L("Show apps on the watch", "Saatteki uygulamaları göster")) { link.loadInstalledApps() }
                 .disabled(link.busy != nil)
+            Button(L("Import a watch app (.bin)", "Saat uygulaması içe aktar (.bin)")) { pickingWatchApp = true }
+                .disabled(link.busy != nil)
         } header: {
             Text(L("Watch apps", "Saat uygulamaları"))
         } footer: {
             if WatchAppCatalog.all.isEmpty {
-                Text(L("No watch app is bundled yet. Apps built with tools/build-watch-app.sh land in WatchApps/ and show up here with an \"Install\" button (see README).",
-                       "Uygulamanın içinde saat uygulaması yok. tools/build-watch-app.sh ile derlenen .bin dosyaları WatchApps/ klasörüne düşer ve burada \"Kur\" düğmesi olarak çıkar (README)."))
+                Text(L("No watch app yet. Import a signed .bin built with tools/build-watch-app.sh (for example from the Files app), or bundle it in WatchApps/ (see README).",
+                       "Henüz saat uygulaması yok. tools/build-watch-app.sh ile derlenen imzalı .bin dosyasını içe aktar (ör. Dosyalar uygulamasından) ya da WatchApps/ klasörüne koy (README)."))
             }
+        }
+        .fileImporter(isPresented: $pickingWatchApp, allowedContentTypes: [UTType(filenameExtension: "bin") ?? .data, .data],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first { link.importWatchApp(url) }
         }
     }
 

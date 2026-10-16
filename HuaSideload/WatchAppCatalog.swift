@@ -14,14 +14,38 @@ struct BundledWatchApp: Identifiable {
 }
 
 enum WatchAppCatalog {
-    static let all: [BundledWatchApp] = {
-        let urls = Bundle.main.urls(forResourcesWithExtension: "bin", subdirectory: nil) ?? []
-        return urls.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return parse([UInt8](data), name: url.deletingPathExtension().lastPathComponent)
+    // Bundled apps plus apps imported on the phone (Documents/WatchApps). Importing keeps signed .bin files,
+    // which carry the watch's UDID, out of the iPhone app's source and build.
+    static var all: [BundledWatchApp] {
+        let bundled = Bundle.main.urls(forResourcesWithExtension: "bin", subdirectory: nil) ?? []
+        let imported = (try? FileManager.default.contentsOfDirectory(at: importedDirectory, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension.lowercased() == "bin" } ?? []
+        var apps: [String: BundledWatchApp] = [:]
+        for url in bundled + imported {
+            guard let data = try? Data(contentsOf: url),
+                  let app = parse([UInt8](data), name: url.deletingPathExtension().lastPathComponent) else { continue }
+            apps[app.package] = app   // an imported copy replaces a bundled one with the same package
         }
-        .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
-    }()
+        return apps.values.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+    }
+
+    static var importedDirectory: URL { URL.documentsDirectory.appending(path: "WatchApps", directoryHint: .isDirectory) }
+
+    // Copies a picked .bin into the app; fails if it is not a signed watch app
+    static func importApp(from url: URL) throws -> BundledWatchApp {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: url)
+        let name = url.deletingPathExtension().lastPathComponent
+        guard let app = parse([UInt8](data), name: name) else {
+            throw HuaweiAuthError.unexpected(L("\(url.lastPathComponent) is not a watch app (.bin)", "\(url.lastPathComponent) bir saat uygulaması (.bin) değil"))
+        }
+        try FileManager.default.createDirectory(at: importedDirectory, withIntermediateDirectories: true)
+        let destination = importedDirectory.appending(path: name + ".bin")
+        try? FileManager.default.removeItem(at: destination)
+        try data.write(to: destination)
+        return app
+    }
 
     static func app(for package: String) -> BundledWatchApp? {
         all.first { $0.package == package }

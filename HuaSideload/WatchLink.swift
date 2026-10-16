@@ -326,6 +326,17 @@ final class WatchLink: NSObject, ObservableObject {
     static let huaweiAccountKey = "huaweiAccount"
     static var huaweiAccount: String { UserDefaults.standard.string(forKey: huaweiAccountKey) ?? "" }
 
+    func importWatchApp(_ url: URL) {
+        do {
+            let app = try WatchAppCatalog.importApp(from: url)
+            append(.success, L("Imported \(app.name) (\(app.package), \(app.data.count / 1024) KB)",
+                               "\(app.name) içe aktarıldı (\(app.package), \(app.data.count / 1024) KB)"))
+            objectWillChange.send()
+        } catch {
+            append(.error, "\(error)")
+        }
+    }
+
     func introducePhone() {
         run(L("Introducing the phone…", "Telefon tanıtılıyor…")) { session in
             await session.introducePhone(account: Self.huaweiAccount)

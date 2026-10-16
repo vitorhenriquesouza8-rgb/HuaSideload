@@ -405,6 +405,9 @@ final class HuaweiSession {
             // may be what it waits for
             (L("Connect status", "Bağlantı durumu"), 0x01, PhoneSetup.connectStatusCommand, PhoneSetup.connectStatus()),
             (L("Wear status", "Takma durumu"), 0x01, PhoneSetup.wearStatusCommand, PhoneSetup.wearStatus()),
+            (L("Expand capabilities", "Genişletilmiş yetenekler"), 0x01, 0x37, HuaweiTLV().with(0x01)),
+            (L("Setting related", "Ayar yetenekleri"), 0x01, 0x31,
+             HuaweiTLV().with(0x01).with(0x02).with(0x03).with(0x04).with(0x05).with(0x06)),
         ]
         if UserDefaults.standard.bool(forKey: PhoneSetup.claimMainDeviceKey) {
             // Fire and forget: Gadgetbridge notes the watch never answers this one
@@ -436,6 +439,22 @@ final class HuaweiSession {
             } catch {
                 log(.info, "\(label): \(error)")
             }
+        }
+
+        // Supported services, then the commands this phone knows for each of them (GetSupportedCommandsRequest)
+        do {
+            let services = try await supportedServices()
+            let requests = SupportedCommands.requests(for: services)
+            for (index, tlv) in requests.enumerated() {
+                let label = L("Supported commands \(index + 1)/\(requests.count)", "Desteklenen komutlar \(index + 1)/\(requests.count)")
+                let response = try await request(0x01, SupportedCommands.commandId, tlv, label: label, timeout: 5)
+                if let code = response.tlv?.int(0x7F), code != HuaweiPacket.resultSuccess {
+                    log(.error, "\(label): \(L("watch error code", "saat hata kodu")) \(code)")
+                }
+            }
+            log(.success, L("Supported commands negotiated (\(requests.count) requests)", "Desteklenen komutlar bildirildi (\(requests.count) istek)"))
+        } catch {
+            log(.info, L("Supported commands: \(error)", "Desteklenen komutlar: \(error)"))
         }
     }
 

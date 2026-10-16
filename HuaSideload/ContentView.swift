@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var message = ""
     @State private var pickingMusic = false
     @AppStorage(WatchLink.huaweiAccountKey) private var huaweiAccount = ""
+    @AppStorage(PhoneSetup.claimMainDeviceKey) private var claimMainDevice = false
 
     var body: some View {
         NavigationStack {
@@ -127,6 +128,7 @@ struct ContentView: View {
             TextField(L("Huawei account ID (17 digits, optional)", "Huawei hesap kimliği (17 hane, isteğe bağlı)"), text: $huaweiAccount)
                 .keyboardType(.numberPad)
                 .font(.callout.monospaced())
+            Toggle(L("Claim main device (experimental)", "Ana cihaz ol (deneysel)"), isOn: $claimMainDevice)
             Button(L("Disconnect", "Bağlantıyı kes"), role: .destructive) { link.disconnect() }
         } header: {
             Text(L("Watch", "Saat"))

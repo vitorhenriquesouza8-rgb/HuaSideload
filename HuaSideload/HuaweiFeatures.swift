@@ -311,6 +311,18 @@ enum PhoneInfo {
 // PermissionCheck; AccountRelated.SendExtendedAccountToDevice)
 enum PhoneSetup {
     static let timeCommand: UInt8 = 0x05
+    static let claimMainDeviceKey = "claimMainDevice"
+    static let connectStatusCommand: UInt8 = 0x35       // DeviceConfig.ConnectStatusRequest: 0x01 = 1
+    static let wearStatusCommand: UInt8 = 0x3D          // DeviceConfig.WearStatus: 0x01 empty
+    static let setUpDeviceStatusCommand: UInt8 = 0x3E   // DeviceConfig.SetUpDeviceStatusRequest
+
+    static func connectStatus() -> HuaweiTLV { HuaweiTLV().with(0x01, [0x01]) }
+    static func wearStatus() -> HuaweiTLV { HuaweiTLV().with(0x01) }
+
+    // relationship 1 = main device (Gadgetbridge's hardcoded value); the watch never answers
+    static func setUpDeviceStatus(name: String) -> HuaweiTLV {
+        HuaweiTLV().with(0x01, [0x01]).with(0x02, Array(name.utf8)).with(0x03, [0x00])
+    }
     static let acceptAgreementCommand: UInt8 = 0x30
     static let permissionCheckCommand: UInt8 = 0x38
     static let accountServiceId: UInt8 = 0x1A

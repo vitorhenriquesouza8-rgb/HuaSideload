@@ -401,7 +401,16 @@ final class HuaweiSession {
         var steps: [(String, UInt8, UInt8, HuaweiTLV)] = [
             (L("Set time", "Saati ayarla"), 0x01, PhoneSetup.timeCommand, PhoneSetup.time()),
             (L("Accept agreements", "Sözleşmeleri kabul et"), 0x01, PhoneSetup.acceptAgreementCommand, PhoneSetup.acceptAgreements()),
+            // The GT 5 Pro cuts the session ~30 s after pairing; these are Gadgetbridge init steps that
+            // may be what it waits for
+            (L("Connect status", "Bağlantı durumu"), 0x01, PhoneSetup.connectStatusCommand, PhoneSetup.connectStatus()),
+            (L("Wear status", "Takma durumu"), 0x01, PhoneSetup.wearStatusCommand, PhoneSetup.wearStatus()),
         ]
+        if UserDefaults.standard.bool(forKey: PhoneSetup.claimMainDeviceKey) {
+            // Fire and forget: Gadgetbridge notes the watch never answers this one
+            send(0x01, PhoneSetup.setUpDeviceStatusCommand, PhoneSetup.setUpDeviceStatus(name: AppInfo.displayName))
+            log(.info, L("Sent: this phone is the main device (experimental)", "Gönderildi: bu telefon ana cihaz (deneysel)"))
+        }
         if includeMusic {
             // initializeDynamicServices queries the music capabilities before any music upload
             steps += [

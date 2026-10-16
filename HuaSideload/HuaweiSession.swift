@@ -167,11 +167,13 @@ final class HuaweiSession {
             log(.info, L("The watch asked for phone info; answered as Android 14", "Saat telefon bilgisi istedi; Android 14 dedik"))
             return
         }
-        // Gadgetbridge answers {permission, status 0}, but on the GT 5 Pro the actions stopped working after
-        // such an answer was refused (100004), so for now the check is only logged, not answered
+        // The GT 5 Pro sends this right after each notification and cut the whole session soon after,
+        // both when left unanswered and when answered with Gadgetbridge's status 0 ("no permission").
+        // Answer status 1 (granted) instead.
         if isPaired, packet.serviceId == 0x01, packet.commandId == PhoneSetup.permissionCheckCommand,
            let tlv = packet.tlv, let permission = tlv.value(0x01), tlv.value(0x7F) == nil {
-            log(.info, L("The watch asked a permission check (\(permission.hexCompact)); not answered", "Saat izin kontrolü sordu (\(permission.hexCompact)); cevaplanmadı"))
+            send(0x01, PhoneSetup.permissionCheckCommand, PhoneSetup.permissionCheckReply(permission: permission, granted: true))
+            log(.info, L("The watch asked a permission check (\(permission.hexCompact)); answered granted", "Saat izin kontrolü sordu (\(permission.hexCompact)); izin var dendi"))
             return
         }
         if isPaired, packet.serviceId == WatchApps.serviceId, packet.commandId == WatchApps.installStatusCommand, let tlv = packet.tlv {

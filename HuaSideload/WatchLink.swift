@@ -267,7 +267,7 @@ final class WatchLink: NSObject, ObservableObject {
     // it. Actions therefore renew a session older than this first.
     private var pairedAt: Date?
     private var renewing = false
-    private let sessionLifetime: TimeInterval = 60
+    private let sessionLifetime: TimeInterval = 30
 
     private func renewSessionIfStale() async -> Bool {
         if isPaired, let pairedAt, Date().timeIntervalSince(pairedAt) < sessionLifetime { return true }

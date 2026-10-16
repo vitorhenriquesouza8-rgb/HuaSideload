@@ -346,7 +346,7 @@ enum PhoneSetup {
         return HuaweiTLV().with(0x81, list.serialize())
     }
 
-    static func permissionCheckReply(permission: [UInt8]) -> HuaweiTLV {
-        HuaweiTLV().with(0x01, permission).with(0x02, .bigEndian(UInt16(0)))
+    static func permissionCheckReply(permission: [UInt8], granted: Bool) -> HuaweiTLV {
+        HuaweiTLV().with(0x01, permission).with(0x02, .bigEndian(UInt16(granted ? 1 : 0)))
     }
 }

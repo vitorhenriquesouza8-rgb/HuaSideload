@@ -1,0 +1,7 @@
+<div class="container">
+    <text class="title">HuaSideload</text>
+    <text class="reply">{{reply}}</text>
+    <div class="button" onclick="sayHello">
+        <text class="label">Say hello to the phone</text>
+    </div>
+</div>

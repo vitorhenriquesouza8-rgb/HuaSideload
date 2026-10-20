@@ -1,0 +1,60 @@
+name: Build watch apps (hvigor)
+
+# Builds the lite wearable apps in watch-apps-hvigor/ with Huawei's current command line tools (hvigor),
+# the toolchain newer watches (GT 4/5/6, FIT 3/4) are built with. The output is unsigned: sign it locally
+# with tools/sign-hvigor-app.py (the signing key and profiles never leave the PC).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['watch-apps-hvigor/**', '.github/workflows/build-watch-hvigor.yml']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [sample]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev
+
+      # Version matching the project's modelVersion 6.1.1 (faMode lite wearable projects)
+      - name: Set up HarmonyOS command line tools
+        uses: ErBWs/setup-ohos@v2
+        with:
+          version: 6.1.1.280
+          cache: true
+
+      - name: Put the tools on PATH
+        run: |
+          for p in "$HOME/ohos-sdk/command-line-tools/bin" "$HOME/ohos-sdk/command-line-tools/tool/node/bin"; do
+            if [ -d "$p" ]; then echo "$p" >> "$GITHUB_PATH"; fi
+          done
+          if [ -d "$HOME/ohos-sdk/command-line-tools/sdk" ]; then
+            echo "HOS_SDK_HOME=$HOME/ohos-sdk/command-line-tools/sdk" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install dependencies
+        working-directory: watch-apps-hvigor/${{ matrix.app }}
+        run: ohpm install --all
+
+      - name: Build unsigned app
+        working-directory: watch-apps-hvigor/${{ matrix.app }}
+        run: hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon --accept-license
+
+      - name: Collect
+        run: |
+          mkdir -p dist
+          cp watch-apps-hvigor/${{ matrix.app }}/build/outputs/default/*.app dist/
+          ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-hvigor-unsigned
+          path: dist/
+          if-no-files-found: error

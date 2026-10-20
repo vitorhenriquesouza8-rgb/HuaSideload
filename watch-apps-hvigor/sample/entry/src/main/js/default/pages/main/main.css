@@ -1,0 +1,42 @@
+.container {
+    width: 466px;
+    height: 466px;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background-color: #000000;
+}
+
+.title {
+    width: 400px;
+    height: 60px;
+    font-size: 38px;
+    color: #FFFFFF;
+    text-align: center;
+}
+
+.reply {
+    width: 360px;
+    height: 100px;
+    font-size: 30px;
+    color: #33CC66;
+    text-align: center;
+}
+
+.button {
+    width: 320px;
+    height: 90px;
+    border-radius: 45px;
+    background-color: #2A6FDB;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+}
+
+.label {
+    width: 300px;
+    height: 50px;
+    font-size: 30px;
+    color: #FFFFFF;
+    text-align: center;
+}

@@ -54,6 +54,8 @@ final class HuaweiSession {
     private(set) var watchUDID: String?
     private var sessionKey: [UInt8]?
     private var waiters: [Waiter] = []
+    // DataSync senders already logged in this session (the watch repeats them every few seconds)
+    private var acknowledgedDataSync: Set<String> = []
     private var notificationId: UInt16 = 0
 
     private struct Upload {
@@ -106,6 +108,7 @@ final class HuaweiSession {
         isPaired = false
         sessionKey = nil
         lastIntroduction = nil
+        acknowledgedDataSync.removeAll()
         let pending = waiters
         waiters.removeAll()
         pending.forEach { $0.continuation.resume(throwing: HuaweiSessionError.disconnected) }
@@ -181,6 +184,19 @@ final class HuaweiSession {
            let tlv = packet.tlv, let permission = tlv.value(0x01), tlv.value(0x7F) == nil {
             send(0x01, PhoneSetup.permissionCheckCommand, PhoneSetup.permissionCheckReply(permission: permission, granted: true))
             log(.info, L("The watch asked a permission check (\(permission.hexCompact)); answered granted", "Saat izin kontrolü sordu (\(permission.hexCompact)); izin var dendi"))
+            return
+        }
+        // DataSync (Gadgetbridge DataSync): the GT 5 Pro keeps sending these (featureManager every 15 s, wechatDevice
+        // every 5 s, ...) and repeats them while unanswered; it revokes the session ~30 s after pairing, which also
+        // aborts app installs. Acknowledge each with the same packages and 0x7F = success.
+        if isPaired, packet.serviceId == DataSync.serviceId, let tlv = packet.tlv, tlv.value(0x7F) == nil,
+           let source = tlv.value(0x01), let destination = tlv.value(0x02) {
+            send(DataSync.serviceId, packet.commandId, DataSync.ack(source: source, destination: destination))
+            let name = String(decoding: source, as: UTF8.self)
+            if acknowledgedDataSync.insert("\(name)/\(packet.commandId)").inserted {
+                log(.info, L("Acknowledged the watch's data sync from \(name) (0x37/\(String(format: "%02X", packet.commandId)))",
+                             "Saatin veri eşitlemesi onaylandı: \(name) (0x37/\(String(format: "%02X", packet.commandId)))"))
+            }
             return
         }
         if isPaired, packet.serviceId == WatchApps.serviceId, packet.commandId == WatchApps.installStatusCommand, let tlv = packet.tlv {

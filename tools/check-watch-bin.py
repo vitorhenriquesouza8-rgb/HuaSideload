@@ -83,8 +83,9 @@ def check(path):
     if not isinstance(ability.get("iconId"), int) or ability["iconId"] <= 0:
         errors.append("iconId missing")
     media = f"/assets/{distro.get('moduleName', 'entry')}/resources/base/media"
+    # The image converter writes icon.bin only for apiVersion <= 6; newer apps carry icon.png.bin
     for icon in ("icon.bin", "icon_small.bin"):
-        if f"{media}/{icon}" not in files:
+        if f"{media}/{icon}" not in files and f"{media}/{icon.replace('.bin', '.png.bin')}" not in files:
             png = icon.replace(".bin", ".png")
             errors.append(f"{media}/{icon} missing -> add resources/base/media/{png} (the most common cause of 103)")
     if not any(k.startswith("/assets/js/default") for k in files):

@@ -18,8 +18,13 @@ enum WatchAppCatalog {
     // which carry the watch's UDID, out of the iPhone app's source and build.
     static var all: [BundledWatchApp] {
         let bundled = Bundle.main.urls(forResourcesWithExtension: "bin", subdirectory: nil) ?? []
-        let imported = (try? FileManager.default.contentsOfDirectory(at: importedDirectory, includingPropertiesForKeys: nil))?
-            .filter { $0.pathExtension.lowercased() == "bin" } ?? []
+        // Oldest first, so the most recently imported copy of a package wins
+        func modified(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        let imported = ((try? FileManager.default.contentsOfDirectory(at: importedDirectory, includingPropertiesForKeys: [.contentModificationDateKey]))?
+            .filter { $0.pathExtension.lowercased() == "bin" } ?? [])
+            .sorted { modified($0) < modified($1) }
         var apps: [String: BundledWatchApp] = [:]
         for url in bundled + imported {
             guard let data = try? Data(contentsOf: url),

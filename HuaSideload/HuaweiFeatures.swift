@@ -165,6 +165,16 @@ enum FileUpload {
     }
 }
 
+// Data sync between watch and phone components (Gadgetbridge: packets/DataSync.java)
+enum DataSync {
+    static let serviceId: UInt8 = 0x37
+
+    // Reply to a watch request: same packages, 0x7F = success (HuaweiDataSyncCommon.REPLY_OK)
+    static func ack(source: [UInt8], destination: [UInt8]) -> HuaweiTLV {
+        HuaweiTLV().with(0x01, source).with(0x02, destination).with(0x7F, .bigEndian(UInt32(HuaweiPacket.resultSuccess)))
+    }
+}
+
 // Apps on the watch (Gadgetbridge: packets/App.java)
 enum WatchApps {
     static let serviceId: UInt8 = 0x2A

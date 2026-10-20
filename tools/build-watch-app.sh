@@ -3,6 +3,7 @@
 #
 #   tools/build-watch-app.sh watch-apps/sample          (debug: plain JS)
 #   tools/build-watch-app.sh watch-apps/sample release  (release: bytecode)
+#   tools/build-watch-app.sh watch-apps/sample min      (minified plain JS, no bytecode: newer watches cap a page at 48 KB)
 #
 # Command-line equivalent of DevEco Studio's "legacy lite" build:
 #   manifest -> ace-loader (webpack lite) -> restool -> haptobin_tool -> hap-sign-tool (bin)
@@ -18,7 +19,8 @@ set -euo pipefail
 
 [ $# -ge 1 ] || { sed -n '2,17p' "$0"; exit 1; }
 APP="$(cd "$1" && pwd)"
-MODE="${2:-debug}"   # debug: plain JS, release: jerry-snapshot bytecode
+MODE="${2:-debug}"   # debug: plain JS, release: jerry-snapshot bytecode, min: minified plain JS
+WEBPACK_MODE=$([ "$MODE" = debug ] && echo debug || echo release)
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SIGNING="${HUASIDELOAD_SIGNING_DIR:-$REPO/signing}"
 OUT_DIR="${HUASIDELOAD_OUT_DIR:-$REPO/WatchApps}"
@@ -109,7 +111,7 @@ echo "2/5 ace-loader (lite, $MODE)"
   aceManifestPath="$(native_path "$BUILD/manifest/manifest.json")" cachePath="$(native_path "$BUILD/cache")" \
   img2bin=true iconPath="$(native_path "$BUILD/lite_bin_source")" hapMode=$([ "$MODE" = release ] && echo true || echo false) \
   "$NODE" ./node_modules/webpack/bin/webpack.js --config webpack.lite.config.js \
-    --env buildMode="$MODE" --env deviceType=liteWearable) > "$BUILD/compile.log" 2>&1 || true
+    --env buildMode="$WEBPACK_MODE" --env deviceType=liteWearable) > "$BUILD/compile.log" 2>&1 || true
 grep -E 'COMPILE RESULT' "$BUILD/compile.log" || true
 # The compiler still writes output on errors (a missing module then crashes on the watch): stop here
 if grep -q 'COMPILE RESULT:FAIL' "$BUILD/compile.log" || [ ! -f "$BUILD/loader_out_lite/js/default/app.js" ]; then
@@ -128,6 +130,7 @@ cp "$BUILD/res/config.json" "$LITE/config.json"
 cp -R "$BUILD/loader_out_lite/js" "$LITE/assets/js"
 find "$LITE/assets/js" -name '*.map' -delete
 rm -rf "$LITE/assets/js/default/_releaseMap"
+[ "$MODE" = min ] && find "$LITE/assets/js" -name '*.bc' -delete
 cp -R "$BUILD/res/resources" "$LITE/assets/entry/resources"
 cp -R "$BUILD/lite_bin_source/." "$LITE/assets/entry/resources/"
 cp "$BUILD/res/resources.index" "$LITE/assets/entry/resources.index"

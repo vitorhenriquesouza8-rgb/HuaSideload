@@ -540,7 +540,9 @@ final class WatchLink: NSObject, ObservableObject {
     // Installs a signed watch app bundled in the iPhone app (WatchApps/*.bin) on the watch
     func installWatchApp(_ app: BundledWatchApp) {
         watchAppProgress = 0
-        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…"), fresh: true) { session in
+        // The GT 5 Pro aborts an install when it revokes the session (~30 s after pairing): upload and install
+        // take 15-25 s, so always start on a session paired just now
+        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…"), fresh: true, maxAge: 3) { session in
             defer { self.watchAppProgress = nil }
             self.append(.info, "\(app.name): \(app.package) \(app.version), \(app.data.count) \(L("bytes", "bayt"))")
             if let platform = try? await session.appPlatform() {
@@ -589,11 +591,13 @@ final class WatchLink: NSObject, ObservableObject {
         report(0x27, L("Watch faces", "Kadran kurma"))
     }
 
-    private func run(_ label: String, fresh: Bool = false, _ work: @escaping (HuaweiSession) async throws -> Void) {
+    // fresh: renew a session older than maxAge first (default sessionLifetime)
+    private func run(_ label: String, fresh: Bool = false, maxAge: TimeInterval? = nil,
+                     _ work: @escaping (HuaweiSession) async throws -> Void) {
         guard busy == nil else { return }
         busy = label
         Task {
-            if fresh, !(await renewSessionIfStale()) {
+            if fresh, !(await renewSessionIfStale(maxAge: maxAge)) {
                 busy = nil
                 return
             }

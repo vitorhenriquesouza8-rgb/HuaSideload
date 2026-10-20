@@ -262,15 +262,16 @@ final class WatchLink: NSObject, ObservableObject {
 
     // MARK: - Watch commands
 
-    // The GT 5 Pro (firmware 6.0) refuses every action with 100004 about 2-3 minutes after pairing,
-    // even with Huawei Health's Bluetooth off; reconnecting and pairing again with the saved key restores
-    // it. Actions therefore renew a session older than this first.
+    // The GT 5 Pro (firmware 6.0) may revoke the session (every action then fails with 100004);
+    // reconnecting and pairing again with the saved key restores it. A session the watch still keeps cannot
+    // be renewed: iOS keeps the Bluetooth link up, so the watch ignores the new link parameters. Renew only
+    // after the watch answered 100004.
     private var pairedAt: Date?
     private var renewing = false
-    private let sessionLifetime: TimeInterval = 30
+    private var sessionRevoked = false
 
-    private func renewSessionIfStale(maxAge: TimeInterval? = nil) async -> Bool {
-        if isPaired, let pairedAt, Date().timeIntervalSince(pairedAt) < (maxAge ?? sessionLifetime) { return true }
+    private func renewSessionIfStale() async -> Bool {
+        if isPaired, !sessionRevoked { return true }
         guard let peripheral, let watchKey else { return false }
         append(.info, L("Renewing the watch session (it expires after a few minutes)…", "Saat oturumu yenileniyor (birkaç dakikada sona eriyor)…"))
         renewing = true
@@ -288,6 +289,7 @@ final class WatchLink: NSObject, ObservableObject {
         do {
             try await session.pair(watch: watchKey)
             isPaired = true
+            sessionRevoked = false
             self.pairedAt = Date()
             await session.introducePhone(account: Self.huaweiAccount)
             return true
@@ -302,6 +304,7 @@ final class WatchLink: NSObject, ObservableObject {
         run(L("Pairing…", "Eşleşiyor…")) { session in
             try await session.pair(watch: watchKey)
             self.isPaired = true
+            self.sessionRevoked = false
             self.pairedAt = Date()
             self.watchUDID = session.watchUDID
             if let udid = session.watchUDID { self.addSecret(udid) }
@@ -481,8 +484,7 @@ final class WatchLink: NSObject, ObservableObject {
                 self.append(.info, L("Uploading music (\(i + 1)/\(files.count)): \(name), \(data.count / 1024) KB", "Müzik yükleniyor (\(i + 1)/\(files.count)): \(name), \(data.count / 1024) KB"))
                 // The GT 5 Pro revokes the session ~30 s after pairing, long before a song is through. Reconnect
                 // and send the same file again; if the watch kept the received part it asks from there on.
-                // Start each file with most of the ~30 s window left
-                guard await self.renewSessionIfStale(maxAge: 10) else { throw HuaweiSessionError.notPaired }
+                guard await self.renewSessionIfStale() else { throw HuaweiSessionError.notPaired }
                 var attempt = 1
                 while true {
                     do {
@@ -494,7 +496,7 @@ final class WatchLink: NSObject, ObservableObject {
                         attempt += 1
                         self.append(.info, L("Session cut mid-upload; reconnecting to continue (attempt \(attempt))",
                                              "Yükleme sırasında oturum kesildi; devam etmek için yeniden bağlanılıyor (deneme \(attempt))"))
-                        guard await self.renewSessionIfStale(maxAge: 0) else { throw HuaweiSessionError.sessionRevoked }
+                        guard await self.renewSessionIfStale() else { throw HuaweiSessionError.sessionRevoked }
                     }
                 }
                 self.append(.success, L("Uploaded to the watch: \(meta.title)", "Saate yüklendi: \(meta.title)"))
@@ -540,9 +542,7 @@ final class WatchLink: NSObject, ObservableObject {
     // Installs a signed watch app bundled in the iPhone app (WatchApps/*.bin) on the watch
     func installWatchApp(_ app: BundledWatchApp) {
         watchAppProgress = 0
-        // The GT 5 Pro aborts an install when it revokes the session (~30 s after pairing): upload and install
-        // take 15-25 s, so always start on a session paired just now
-        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…"), fresh: true, maxAge: 3) { session in
+        run(L("Installing \(app.name) on the watch…", "\(app.name) saate yükleniyor…"), fresh: true) { session in
             defer { self.watchAppProgress = nil }
             self.append(.info, "\(app.name): \(app.package) \(app.version), \(app.data.count) \(L("bytes", "bayt"))")
             if let platform = try? await session.appPlatform() {
@@ -591,13 +591,12 @@ final class WatchLink: NSObject, ObservableObject {
         report(0x27, L("Watch faces", "Kadran kurma"))
     }
 
-    // fresh: renew a session older than maxAge first (default sessionLifetime)
-    private func run(_ label: String, fresh: Bool = false, maxAge: TimeInterval? = nil,
-                     _ work: @escaping (HuaweiSession) async throws -> Void) {
+    // fresh: renew the session first if the watch revoked it
+    private func run(_ label: String, fresh: Bool = false, _ work: @escaping (HuaweiSession) async throws -> Void) {
         guard busy == nil else { return }
         busy = label
         Task {
-            if fresh, !(await renewSessionIfStale(maxAge: maxAge)) {
+            if fresh, !(await renewSessionIfStale()) {
                 busy = nil
                 return
             }
@@ -663,6 +662,7 @@ final class WatchLink: NSObject, ObservableObject {
 
         if let code = packet.resultCode, code != HuaweiPacket.resultSuccess {
             append(.error, String(format: L("The watch returned error code 0x%X (%d)", "Saat hata kodu döndü: 0x%X (%d)"), code, code))
+            if code == 100_004 { sessionRevoked = true }
         }
 
         if packet.serviceId == 0x01, packet.commandId == 0x08, let level = packet.tlv?.int(0x01) {

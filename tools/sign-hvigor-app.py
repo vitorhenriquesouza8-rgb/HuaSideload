@@ -94,7 +94,7 @@ def main():
              "-keystoreFile", os.path.join(signing, env["SIGN_KEYSTORE"]), "-keystorePwd", password,
              "-appCertFile", os.path.join(signing, env["SIGN_CERT"]), "-profileFile", profile,
              "-inFile", unsigned_path, "-inForm", "bin", "-signAlg", "SHA256withECDSA", "-outFile", name],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if not os.path.isfile(name):
             sys.exit("signing failed:\n" + result.stdout + result.stderr)
     print(f"{name} ({bundle}, apiVersion {config['app'].get('apiVersion')}, {os.path.getsize(name)} bytes)")

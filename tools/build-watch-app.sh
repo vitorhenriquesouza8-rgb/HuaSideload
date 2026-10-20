@@ -78,6 +78,8 @@ print(bundle)
 print(name.replace("/", "-"))
 EOF
 )
+# Python on Windows prints CRLF line endings
+BUNDLE="${BUNDLE%$'\r'}"; NAME="${NAME%$'\r'}"
 echo "== $NAME ($BUNDLE), $MODE"
 
 echo "1/5 manifest.json"
